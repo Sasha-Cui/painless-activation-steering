@@ -109,16 +109,16 @@ Key folders/files:
 
 ### Running experiments
 
-- Table 3 and 6:
+- Table 3 and 5:
 ```bash
 for seed in {1..15}; do
   python main.py -c configs/scale_up_configs/scale_up_<MODEL_NAME>.yaml --seed $seed
 done
 ```
 Replace `<MODEL_NAME>` with each of the three models (e.g., `DeepSeek-R1-Distill-Llama-8B`, `Llama-3.1-8B-Instruct`, or `Nous-Hermes-2-Mistral-7B-DPO`).
-Note that Table 3 and Table 6 use different sets of benchmarks.
+Note that Table 3 and Table 5 use different sets of benchmarks.
 
-- Table 5:
+- Table 4:
 ```bash
 for seed in {1..15}; do
   python main.py -c configs/scale_up_catastrophic/scale_up_<MODEL_NAME>.yaml --seed $seed
@@ -126,7 +126,7 @@ done
 ```
 Replace `<MODEL_NAME>` with each of the three models (e.g., `DeepSeek-R1-Distill-Llama-8B`, `Llama-3.1-8B-Instruct`, or `Nous-Hermes-2-Mistral-7B-DPO`).
 
-- Table 7-9:
+- Table 6-8:
 ```bash
 for seed in {1..15}; do
   python main.py -c configs/scale_up_catastrophic/scale_up_<MODEL_NAME>.yaml --seed $seed --steer_target <steer_target>
@@ -135,7 +135,7 @@ done
 Replace `<MODEL_NAME>` with each of the three models (e.g., `DeepSeek-R1-Distill-Llama-8B`, `Llama-3.1-8B-Instruct`, or `Nous-Hermes-2-Mistral-7B-DPO`).
 Replace '<steer_target>' with each of the three steering targets (e.g., `self attn`, `post attn`, or `mlp`).
 
-- Table 10:
+- Table 9-10:
 ```bash
 for seed in {1..15}; do
   python main.py -c configs/scale_up_ICL/icl_scale_up_<MODEL_NAME>.yaml --seed $seed
