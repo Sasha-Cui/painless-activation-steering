@@ -96,13 +96,18 @@ class Pipeline(object):
 
         
         print(f"[Start] {self.timestamp} - Main function running started")
-        login(token=self.hf_token)
+        if self.hf_token:  # otherwise fall back to the cached CLI login (~/.cache/huggingface/token)
+            login(token=self.hf_token)
         self._prepare_logging()
         print(self.get_config())
         print_env_info()
         model, tok = self._model_loading()
 
-        self._run_all_benchmarks(model=model, tok=tok)
+        if "handcrafted_prompt_pair" in self.methods:
+            pairs = self._load_prompt_pairs()
+            self._run_all_benchmarks(model=model, tok=tok, pairs=pairs)
+        else:
+            self._run_all_benchmarks(model=model, tok=tok)
 
         end_time = datetime.now()
         print(f"[End] {end_time.strftime('%Y-%m-%d_%H_%M_%S')} - Main function running completed - [Elapsed] {str(end_time - self.start_dt)}")
@@ -147,6 +152,50 @@ class Pipeline(object):
         # Load the model
         model, tok = load_lm(name = self.model_name, device=real_device, quantization = self.quantization)
         return model, tok
+
+    def _load_prompt_pairs(self):
+        """Load CAA prompt pairs, grouped by the task they were written for.
+
+        Returns {task: [(positive, negative), ...]}. The steering vector for a
+        benchmark is built only from that benchmark's pairs, as in CAA
+        (Rimsky et al., 2024), where each behavior has its own vector. A file
+        without a `task` column falls back to a single pooled set.
+        """
+        print(f"\n\n>>> Loading CAA prompt pairs from {self.prompt_pairs}")
+        df = pd.read_csv(self.prompt_pairs)
+        if "task" not in df.columns:
+            pairs = [
+                (str(pos).strip(), str(neg).strip())
+                for pos, neg in zip(df["positive_example"], df["negative_example"])
+                if isinstance(pos, str) and isinstance(neg, str)
+            ]
+            print(f"Loaded {len(pairs)} prompt pairs (no `task` column: pooled across tasks)")
+            return {None: pairs}
+
+        pairs_by_task = {}
+        for task, sub_df in df.groupby("task"):
+            pairs_by_task[task] = [
+                (str(pos).strip(), str(neg).strip())
+                for pos, neg in zip(sub_df["positive_example"], sub_df["negative_example"])
+                if isinstance(pos, str) and isinstance(neg, str)
+            ]
+        total = sum(len(v) for v in pairs_by_task.values())
+        print(f"Loaded {total} prompt pairs across {len(pairs_by_task)} tasks: "
+              f"{ {k: len(v) for k, v in sorted(pairs_by_task.items())} }")
+        return pairs_by_task
+
+    def _pairs_for_benchmark(self, pairs, bench_name):
+        """Select the pairs written for `bench_name` (or the pooled set)."""
+        if not isinstance(pairs, dict):
+            return pairs
+        if None in pairs:
+            return pairs[None]
+        if bench_name not in pairs:
+            raise ValueError(
+                f"No prompt pairs for benchmark '{bench_name}' in {self.prompt_pairs}; "
+                f"available tasks: {sorted(pairs)}"
+            )
+        return pairs[bench_name]
 
     def _run_all_benchmarks(self, model, tok, pairs=None):
         print("\n\nLoading benchmarks")
@@ -265,7 +314,7 @@ class Pipeline(object):
                             build_steer_vec_handcrafted_prompt_pair(
                                 model=model,
                                 tok=tok,
-                                pairs=pairs,
+                                pairs=self._pairs_for_benchmark(pairs, bench_name),
                                 layer=layer,
                                 device=self.device,
                                 batch=64,
@@ -275,7 +324,6 @@ class Pipeline(object):
 
 
                     builder_dispatch = {
-                        "BAS_statement_only":   builder.build_BAS_statement_only,
                         "BAS_full_mcq":         builder.build_BAS_full_mcq,
                         "iBAS_all":             builder.build_iBAS_all,
                         "iBAS_wrong_only":      builder.build_iBAS_wrong_only,
@@ -361,7 +409,7 @@ class Pipeline(object):
                         vec = build_steer_vec_handcrafted_prompt_pair(
                             model=model,
                             tok=tok,
-                            pairs=pairs,
+                            pairs=self._pairs_for_benchmark(pairs, bench_name),
                             layer=layer,
                             steer_target=self.steer_target,
                             device=self.device,
@@ -379,9 +427,7 @@ class Pipeline(object):
                             device=self.device
                         )
 
-                        if method == "BAS_statement_only":
-                            vec = builder.build_BAS_statement_only(train_df, train_predictions)
-                        elif method == "BAS_full_mcq":
+                        if method == "BAS_full_mcq":
                             vec = builder.build_BAS_full_mcq(train_df, train_predictions)
                         elif method == "iBAS_all":
                             vec = builder.build_iBAS_all(train_df, train_predictions)

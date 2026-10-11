@@ -345,6 +345,7 @@ dependencies:
   - openjpeg=2.5.3=h5fbd93e_0
   - openldap=2.6.9=he970967_0
   - openssl=3.5.0=h7b32b05_1
+  - openai=2.8.1
   - orc=2.0.2=h669347b_0
   - orjson=3.10.18=py312h12e396e_0
   - overrides=7.7.0=pyhd8ed1ab_1

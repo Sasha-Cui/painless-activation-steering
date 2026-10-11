@@ -30,6 +30,7 @@ Authentication (create a `.env` in repo root):
 ```bash
 # .env
 hf_token=hf_xxx_your_token_here
+OPENAI_API_KEY=sk-xxx_your_key_here   # only needed for the open-ended experiment (Table 11)
 ```
 
 ## Quickstart
@@ -143,6 +144,39 @@ done
 ```
 Replace `<MODEL_NAME>` with each of the three models (e.g., `DeepSeek-R1-Distill-Llama-8B`, `Llama-3.1-8B-Instruct`, or `Nous-Hermes-2-Mistral-7B-DPO`).
 
+- Tables 2 and 3, and Figure 2 (CAA baseline):
+```bash
+# 1. generate the contrastive prompt pairs with each model (10 per task);
+#    skip this step to reuse the pairs shipped in prompt_pairs_outputs/
+python generate_caa_pairs.py --model <HF_MODEL> \
+    --generators contrastive_prompt_generators.csv \
+    --out prompt_pairs_outputs/<MODEL_STEM>_contrastive_pairs_expanded.csv
+python generate_caa_pairs.py --model <HF_MODEL> \
+    --generators contrastive_prompt_generators_intelligence.csv \
+    --out prompt_pairs_outputs/<MODEL_STEM>_contrastive_pairs_expanded.csv
+
+# 2. run the baseline (one steering vector per task, seed 39)
+python main.py -c configs/CAA/CAA_per_task_<MODEL>.yaml
+python main.py -c configs/CAA/CAA_per_task_intelligence_<MODEL>.yaml
+```
+`<MODEL>` is `Nous`, `DeepSeek` or `Llama`. The baseline builds one vector per task from that task's pairs, as in CAA (Rimsky et al., 2024).
+
+- Table 3 (positive/negative ratios of the PAS training sets):
+```bash
+python compute_pos_neg_ratios.py                 # all 3 models x 15 tasks x 15 seeds
+python compute_pos_neg_ratios.py --seeds 1       # one seed per model (much faster)
+```
+Writes `pos_neg_ratios.csv`; the version behind Table 3 is included as `results/pos_neg_ratios/pos_neg_ratios.csv`.
+
+- Table 13 (open-ended generation):
+```bash
+python main_open_ended.py -c configs/open_ended/open_ended_Nous-Hermes-2-Mistral-7B-DPO.yaml
+python main_open_ended.py -c configs/open_ended/open_ended_DeepSeek-R1-Distill-Llama-8B.yaml
+```
+Each config contains the seed, sample size, and layer/strength grid used for Table 11. Steering vectors and hyperparameters are selected on the multiple-choice train/validation splits; the test split is converted to open-ended prompts, the model answers with greedy decoding, and GPT-4o grades each answer 0/1 against the reference answer. This requires `OPENAI_API_KEY` (see above) and makes paid OpenAI API calls.
+
+Results are written to `output_scale_up/<model>/open_ended/residual/seed_<seed>/tables/open_ended_test_scores.csv`. In Table 13, `Raw` is the `raw_model` column, and `iPASa` / `iPASwo` are the `iBAS_all` / `iBAS_wrong_only` columns minus `raw_model`. GPT-4o grading is not fully deterministic, so reruns may differ slightly from the reported values.
+
 - Comparison with SFT (Supervised Fine Tuning):
 ```
 Replace `<MODEL_NAME>` with `main_vicuna-7b.yaml` and `main_vicuna-7b-fine-tuning_truthfulQA_128_20`
@@ -188,6 +222,8 @@ to run the experiments with different sample sizes.
 ### Creating tables and plots
 
 Open `statistical_analysis.ipynb` to regenerate tables and plots used in the paper.
+
+- Figure 2 (PAS vs. CAA on behavior tasks) and Tables 2-3: the per-seed summary tables are included in `results/figure2/` (PAS: `output_scale_up/<model>/residual/seed_{1..15}`; CAA: `output_CAA_per_task/<model>/residual/seed_39`), and the positive/negative counts in `results/pos_neg_ratios/`. Run the first section of the notebook to produce `plots/figure2.pdf`, `tables/table_main_summary.tex` (Table 2) and `tables/table_pos_neg_ratio.tex` (Table 3).
 
 ## Troubleshooting
 

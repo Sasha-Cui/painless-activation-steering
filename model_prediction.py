@@ -1,4 +1,5 @@
 from preambles import *
+import openai
 from util import get_layer
 # ─────────────────────────────── Building Model Predictions on a Data Frame ──────────────────────────────
 
@@ -357,3 +358,156 @@ def compare_predictions(df, unsteered_preds, steered_preds):
     w2r["unsteered_pred"] = unsteered_preds.loc[w2r_idx]
     w2r["steered_pred"]   = steered_preds.loc[w2r_idx]
     return r2w, w2r
+
+
+# ─────────────────────────────── Open-Ended Evaluation ───────────────────────────────
+@torch.inference_mode()
+def evaluate_open_ended_with_steering(
+    model,
+    tok,
+    df,
+    steer: torch.Tensor | None,
+    steer_strength: float,
+    layer: int,
+    steer_target: str = "residual",
+    device: str = "cuda",
+    *,
+    openai_model: str = "gpt-4o",
+    return_preds: bool = False,
+    save_dir=None,
+):
+    """
+    Open-ended evaluation with:
+      1) steering hook (optional),
+      2) model-generated answers,
+      3) GPT scorer that grades each answer 0/1 given context+question+true answer.
+
+    Returns
+    -------
+    test_score : float
+    (test_score, preds: pd.Series) if return_preds is True.
+    """
+    # ---------- Generate answers ----------
+    prompts = df["open_ended_prompt"].tolist()   # must exist in df
+    true_answers = df["open_ended_true_answer"].tolist()  # must exist in df
+
+    model.eval()
+    preds = []
+
+    if steer is not None:
+        hook_context = apply_steering_hook(
+            model, layer, steer, steer_strength, steer_target
+        )
+    else:
+        @contextmanager
+        def noop():
+            yield
+        hook_context = noop()
+
+    with hook_context:
+        for prompt in tqdm(
+            prompts,
+            total=len(prompts),
+            desc=f"Generating open-ended answers (layer={layer}, strength={steer_strength})",
+            disable=not sys.stdout.isatty(),
+            leave=False,
+            file=sys.__stdout__,
+        ):
+            enc = tok(
+                prompt,
+                return_tensors="pt",
+                truncation=True,
+            ).to(device)
+
+
+            out = model.generate(
+                **enc,
+                max_new_tokens=128,
+                do_sample=False,
+                temperature=None,
+                top_p=None,
+            )
+            generated = tok.decode(out[0][enc["input_ids"].shape[1]:], skip_special_tokens=True)
+            preds.append(generated.strip())
+
+    assert not model._forward_hooks, "Hook was not properly removed!"
+
+    preds_series = pd.Series(preds, index=df.index, name="model_answer")
+
+    # ----------Ask GPT to score each (context+question, model answer, true answer) ----------
+    client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+    scores: list[float] = []
+
+    for full_prompt, model_ans, true_ans in tqdm(
+        list(zip(prompts, preds, true_answers)),
+        total=len(prompts),
+        desc="Scoring answers with GPT",
+        disable=not sys.stdout.isatty(),
+        leave=False,
+        file=sys.__stdout__,
+    ):
+        score_instruction = f"""
+You are grading a student's short answer.
+
+Context + Question:
+-------------------
+{full_prompt}
+
+Student's answer:
+-----------------
+{model_ans}
+
+Reference / true answer:
+------------------------
+{true_ans}
+
+Instructions:
+Return ONLY:
+- 1 if the student's answer matches or mostly matches the correct answer.
+- 0 if the student's answer is incorrect or incomplete.
+- No extra text, output only 0 or 1.
+"""
+
+        chat_completion = client.chat.completions.create(
+            model=openai_model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": score_instruction.strip(),
+                }
+            ],
+        )
+        raw_score_text = chat_completion.choices[0].message.content.strip()
+
+        # Extract the first number in the response, just in case
+        m = re.search(r"[-+]?\d+(\.\d+)?", raw_score_text)
+        if m:
+            score_val = float(m.group(0))
+        else:
+            # Fall back to 0 if GPT returns something unexpected
+            score_val = 0.0
+
+        # Clamp to [0,1]
+        score_val = max(0.0, min(1.0, score_val))
+        scores.append(score_val)
+
+    # ---------- Sanity check lengths ----------
+    if len(scores) != len(df):
+        raise ValueError(
+            f"Length mismatch: got {len(scores)} GPT scores but df has {len(df)} rows."
+        )
+
+    scores_series = pd.Series(scores, index=df.index, name="score_0_1")
+
+    test_score = float(np.mean(scores))
+
+    # ---------- Optional save ----------
+    if save_dir is not None:
+        save_dir.mkdir(parents=True, exist_ok=True)
+        dump = df.copy()
+        dump["model_answer"] = preds_series
+        dump["score_0_1"] = scores_series
+        dump.to_csv(save_dir / "open_ended_predictions.csv", index=False)
+
+    return (test_score, preds_series) if return_preds else test_score

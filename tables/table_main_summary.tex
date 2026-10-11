@@ -1,0 +1,38 @@
+\begin{table*}[!htbp]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{0.9}
+\setlength{\aboverulesep}{0.25ex}
+\setlength{\belowrulesep}{0.25ex}
+\begin{tabular}{llrrrr}
+\toprule
+\textbf{Model} & \textbf{Method} &
+\textbf{Bias} & \textbf{Morality} &
+\textbf{Alignment} & \textbf{Intelligence} \\
+\midrule
+\multirow{3}{*}{Nous-Hermes-2-Mistral-7B}
+ & iPASa  & 7.3 (0.1) & 6.1 (0.4) & 29.4 (0.8) & 0.2 (0.1) \\
+ & iPASwo & 8.6 (0.1) & 6.0 (0.3) & 23.8 (1.7) & 0.4 (0.3) \\
+ & PASf   & 4.9 (0.1) & 4.7 (0.3) & 36.3 (1.1) & 0.4 (0.2) \\
+\midrule
+\multirow{3}{*}{DeepSeek-R1-Distill-8B}
+ & iPASa  & 7.9 (0.2) & 6.1 (0.4) & 24.4 (2.5) & 4.6 (0.4) \\
+ & iPASwo & 10.3 (0.2) & 5.5 (0.4) & 28.0 (2.1) & 3.8 (0.4) \\
+ & PASf   & 1.8 (0.3) & 1.7 (0.2) & 33.3 (2.1) & 5.4 (0.4) \\
+\midrule
+\multirow{3}{*}{Llama-3.1-8B-Instruct}
+ & iPASa  & 9.4 (0.1) & 3.3 (0.9) & 27.8 (0.4) & 0.7 (0.3) \\
+ & iPASwo & 11.3 (0.2) & 3.5 (1.0) & 24.9 (1.2) & 0.2 (0.3) \\
+ & PASf   & 4.4 (0.1) & 2.0 (0.5) & 35.0 (0.7) & 0.9 (0.3) \\
+\midrule
+Mean over the three models & CAA & 3.6 (0.4)$^{\dagger}$ & 3.5 (2.1)$^{\dagger}$ & 15.7 (5.4)$^{\dagger}$ & -2.4 (2.4)$^{\dagger}$ \\
+\bottomrule
+\end{tabular}
+\caption{Summary of PAS steering effects across models and domains. Entries are mean test-accuracy improvements
+(percentage points) over the unsteered model, averaged across the 15 trials and across tasks within each domain,
+with standard errors across trials in parentheses. $^{\dagger}$The CAA baseline builds one steering vector per task
+and was run for a single trial per model due to computational constraint. Its entries are averaged over the three
+models, with standard errors across models in parentheses.}
+\label{tab:main_summary}
+\end{table*}

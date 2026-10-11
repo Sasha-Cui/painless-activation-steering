@@ -7,7 +7,7 @@ class BenchmarkLoader:
     give   (max_sample_size,  train_prop, val_prop, test_prop).
     """
     def __init__(self, *, n_train: int | None = None, n_val:   int | None = None, n_test:  int | None = None, max_sample_size: int | None = None,
-        train_prop: float = 0.6, val_prop: float = 0.2, test_prop:  float = 0.2, seed: int):
+        train_prop: float = 0.6, val_prop: float = 0.2, test_prop:  float = 0.2, open_ended: bool = False, seed: int):
         self.raw_n_train = n_train         
         self.raw_n_val   = n_val
         self.raw_n_test  = n_test
@@ -16,6 +16,7 @@ class BenchmarkLoader:
         self.val_prop   = val_prop
         self.test_prop  = test_prop
         self.seed = seed
+        self.open_ended = open_ended
         # will be filled once we know df size
         self.n_train = self.n_val = self.n_test = None
         self.df = None
@@ -68,6 +69,8 @@ class BenchmarkLoader:
         if self.n_val > 0:
             print(f"  • {len(self.val_df)} for validation")
         print(f"  • {len(self.test_df)} for testing")
+        if self.open_ended:
+            self._make_test_open_ended()
 
 
     def _format_mc_question(self, question: str, choices: list, correct_idx: int, context: str = None) -> dict:
@@ -104,6 +107,44 @@ class BenchmarkLoader:
             "num_choices": len(lettered_choices)
         }
 
+    def _make_open_ended_prompt(self, row: pd.Series) -> str:
+        base = str(row.get("question", "")).rstrip()
+        if not base:
+            base = ""  # fallback so we don't crash
+        return base + "\nAnswer:"
+    def _make_test_open_ended(self):
+        """
+        Convert the test split to open-ended:
+          - keep all MC metadata (choices, correct_letter, etc.)
+          - create 'open_ended_prompt'
+          - overwrite 'full_prompt' so downstream code sees open-ended prompts
+        """
+        if self.test_df is None or len(self.test_df) == 0:
+            return
+
+        df = self.test_df.copy()
+        # keep the original MC full prompt for reference
+        if "full_prompt" in df.columns:
+            df["full_prompt_mc"] = df["full_prompt"]
+
+        df["open_ended_prompt"] = df.apply(self._make_open_ended_prompt, axis=1)
+
+        # build ground-truth open-ended answer
+        if "correct_choice" in df.columns:
+            df["open_ended_true_answer"] = df["correct_choice"]
+        elif "correct_letter" in df.columns:
+            df["open_ended_true_answer"] = df["correct_letter"]
+        else:
+            raise KeyError(
+                "Cannot construct 'open_ended_true_answer': neither "
+                "'correct_choice' nor 'correct_letter' present in test_df."
+            )
+
+        # Make the model actually see the open-ended version at test time
+        df["full_prompt"] = df["open_ended_prompt"]
+
+        self.test_df = df
+
     def get(self):
         return self.train_df.copy(), self.val_df.copy(), self.test_df.copy()
 
@@ -130,12 +171,12 @@ def remove_inline_choices_from_query(query: str) -> str:
 
 
 # Benchmark Loading function
-def load_benchmark(benchmark_name: str, *, max_sample_size: int | None = None, train_prop: float = 0.6, val_prop:   float = 0.2, test_prop:  float = 0.2, verbose_on = False, seed: int):
+def load_benchmark(benchmark_name: str, *, max_sample_size: int | None = None, train_prop: float = 0.6, val_prop:   float = 0.2, test_prop:  float = 0.2, open_ended: bool = False, verbose_on = False, seed: int):
     if benchmark_name not in benchmark_map:
         raise ValueError(f"Unknown benchmark name: {benchmark_name}")
 
     benchmark_class = benchmark_map[benchmark_name]
-    benchmark = benchmark_class(max_sample_size = max_sample_size, train_prop  = train_prop, val_prop = val_prop, test_prop = test_prop, seed=seed)
+    benchmark = benchmark_class(max_sample_size = max_sample_size, train_prop  = train_prop, val_prop = val_prop, test_prop = test_prop, open_ended=open_ended, seed=seed)
     benchmark.load()
 
     train_df, val_df, test_df = benchmark.get()
@@ -639,7 +680,6 @@ class Sycophancy(BenchmarkLoader):
 benchmark_map = {
     "HighSchoolMathMMLU": HighSchoolMathMMLU,
     "MMLU": MMLU,
-    "PIQA": PIQA,
     "OpenBookQA": OpenBookQA,
     "CommonsenseQA": CommonsenseQA,
     "ARCChallenge": ARCChallenge,
